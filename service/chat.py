@@ -19,6 +19,9 @@ class ChatEngine:
         self.context_budget = int(svc.get("chat_context_budget", 24000))
         self.max_tokens = int(svc.get("chat_max_tokens", 600))
 
+    def set_client(self, client: LlamaClient) -> None:
+        self.client = client
+
     @staticmethod
     def _expand(text: str, name: str) -> str:
         return text.replace("{{char}}", name).replace("{{user}}", "User")

@@ -10,9 +10,9 @@ from typing import Any
 from nicegui import app, run, ui
 
 from cardgen.cli import load_config
-from cardgen.client import LlamaClient
 from cardgen.generator import generate
 from service.chat import ChatEngine
+from service.connection import ConnectionState
 from service.photo import UnderageSubject, analyze_photo, format_analysis
 from service.store import CharacterStore
 
@@ -29,8 +29,14 @@ def _rel(path: Path) -> str:
 def build_ui(config: dict[str, Any]) -> None:
     store = CharacterStore(config["paths"].get("characters_dir", "characters"))
     server = config["server"]
-    client = LlamaClient(server["base_url"], server["model"], server["timeout_s"])
-    engine = ChatEngine(store, client, config)
+    conn = ConnectionState(
+        server["base_url"],
+        server.get("model", ""),
+        allow_remote=bool(server.get("allow_remote", False)),
+        timeout_s=server["timeout_s"],
+    )
+    conn.probe()
+    engine = ChatEngine(store, conn.make_client(), config)
     uploads = ROOT / config["paths"].get("uploads_dir", "uploads")
     uploads.mkdir(parents=True, exist_ok=True)
     app.add_static_files("/files", str(ROOT))
@@ -49,10 +55,11 @@ def build_ui(config: dict[str, Any]) -> None:
 
     tabs = ui.tabs()
     with tabs:
+        conn_tab = ui.tab("Connection")
         create_tab = ui.tab("Create")
         chat_tab = ui.tab("Chat")
         card_tab = ui.tab("Card")
-    panels = ui.tab_panels(tabs, value=create_tab)
+    panels = ui.tab_panels(tabs, value=conn_tab)
 
     # ------------------------------------------------------------------ sidebar
     with ui.left_drawer().classes("w-72"):
@@ -91,8 +98,100 @@ def build_ui(config: dict[str, Any]) -> None:
             refresh_card()
             chat_title.set_text(f"Chat: {store.get(slug)['card']['data'].get('name', slug)}")
 
-    # ------------------------------------------------------------------- create
+    # --------------------------------------------------------------- connection
     with panels:
+        with ui.tab_panel(conn_tab):
+            ui.label("Connect to an inference endpoint").classes("text-subtitle1")
+            ui.label(
+                "Enter the base URL of a running OpenAI-compatible server. For now only "
+                "loopback addresses (127.0.0.1 / localhost / ::1) are accepted."
+            ).classes("text-caption opacity-70")
+            url_in = ui.input("API base URL", value=conn.base_url).classes("w-full")
+            with ui.row().classes("items-center gap-3"):
+                conn_button = ui.button("Connect / refresh", icon="link")
+                status_label = ui.label("")
+            model_select = ui.select(
+                [], label="Model to use", with_input=True,
+                on_change=lambda e: on_model(e.value),
+            ).classes("w-full")
+            conn_info = ui.column().classes("w-full")
+            conn_error = ui.label("").classes("text-negative")
+
+            def render_conn() -> None:
+                summary = conn.summary()
+                status_label.set_text(
+                    ("ONLINE" if summary["online"] else "OFFLINE")
+                    + " · "
+                    + ("READY" if summary["ready"] else "NOT READY")
+                ).classes(
+                    "text-positive" if summary["ready"] else "text-negative"
+                )
+                conn_error.set_text(summary["error"])
+                ids = [m["id"] for m in summary["models"]]
+                model_select.set_options(ids)
+                model_select.value = summary["selected_model"]
+                conn_info.clear()
+                with conn_info:
+                    ctx = summary["context"]
+                    rows = [
+                        ("Endpoint", summary["base_url"]),
+                        ("Server build", summary["build_info"] or "not reported"),
+                        ("Loaded model", summary["loaded_model"] or "not reported"),
+                        ("Selected model", summary["selected_model"] or "none"),
+                        ("Context", f"{ctx:,} tokens" if ctx else "unknown"),
+                        ("VLM module", "enabled" if summary["vision"] else "not reported / disabled"),
+                        ("Video / Audio", f"{summary['video']} / {summary['audio']}"),
+                        (
+                            "Slots",
+                            ", ".join(
+                                f"#{s['id']} ctx={s['n_ctx']} "
+                                f"({'busy' if s['processing'] else 'idle'})"
+                                for s in summary["slots"]
+                            ) or "not reported",
+                        ),
+                        ("Model path", summary["model_path"] or "not reported"),
+                    ]
+                    lines = ["| Field | Value |", "|---|---|"] + [
+                        f"| {k} | {str(v).replace('|', '/')} |" for k, v in rows
+                    ]
+                    ui.markdown("\n".join(lines))
+                    if not summary["props_available"]:
+                        ui.label(
+                            "This server does not expose /props; context and VLM data come "
+                            "from /v1/models and /slots where available."
+                        ).classes("text-caption opacity-70")
+
+            def on_model(value: str) -> None:
+                conn.set_model(value)
+                engine.set_client(conn.make_client())
+                render_conn()
+
+            async def do_connect() -> None:
+                try:
+                    await run.io_bound(conn.probe, url_in.value)
+                except ValueError as exc:
+                    ui.notify(str(exc), type="negative", timeout=8000)
+                    return
+                engine.set_client(conn.make_client())
+                render_conn()
+                ui.notify("Connected" if conn.ready else "Endpoint inspected — see status",
+                          type="positive" if conn.ready else "warning")
+
+            conn_button.on_click(do_connect)
+
+            def require_ready() -> bool:
+                if conn.ready:
+                    return True
+                ui.notify(
+                    "Connect to a running endpoint and select a model on the Connection tab first",
+                    type="warning", timeout=6000,
+                )
+                panels.value = conn_tab
+                return False
+
+            render_conn()
+
+    # ------------------------------------------------------------------- create
         with ui.tab_panel(create_tab):
             ui.label("1 · Reference material").classes("text-subtitle1")
             with ui.grid(columns=2).classes("w-full gap-2"):
@@ -138,10 +237,12 @@ def build_ui(config: dict[str, Any]) -> None:
                 if not state["photo"]:
                     ui.notify("Upload a photo first", type="warning")
                     return
+                if not require_ready():
+                    return
                 try:
                     state["analysis"] = await run.io_bound(
                         analyze_photo,
-                        client,
+                        conn.make_client(),
                         state["photo"],
                         config["generation"],
                         confirm_adult=confirm_adult.value,
@@ -192,10 +293,12 @@ def build_ui(config: dict[str, Any]) -> None:
                 if state["photo"] and not confirm_adult.value:
                     ui.notify("Confirm the photo subject is an adult", type="warning")
                     return
+                if not require_ready():
+                    return
                 gen_status.set_text("Generating — this takes a few minutes on 16 GB VRAM…")
                 try:
                     args = build_args()
-                    result = await run.io_bound(generate, args, config)
+                    result = await run.io_bound(generate, args, conn.config_override(config))
                     slug = store.create(
                         result["card"],
                         result["portrait_png"],
@@ -256,6 +359,8 @@ def build_ui(config: dict[str, Any]) -> None:
                     return
                 text = (chat_input.value or "").strip()
                 if not text:
+                    return
+                if not require_ready():
                     return
                 chat_input.value = ""
                 chat_status.set_text("Thinking…")

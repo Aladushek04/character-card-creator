@@ -65,7 +65,8 @@ python -m pip install -r requirements.txt
 
 Edit `config.toml`:
 
-- `server.base_url` / `server.model` — endpoint and model id (must match `/v1/models`).
+- `server.base_url` / `server.model` — startup defaults only; the web UI can change both at
+  runtime. `server.allow_remote` is `false` (loopback endpoints only for now).
 - `generation.max_tokens` — output length; 2600 fits a full definition.
 - `generation.min_definition_chars` / `max_definition_chars` — CT's 3500–6000 character target.
 - `generation.max_description_tokens` — secondary token ceiling measured with `/tokenize` (1600).
@@ -104,8 +105,15 @@ python -m pip install -r requirements.txt
 python run_service.py          # http://127.0.0.1:8080
 ```
 
-The UI has three tabs:
+The UI has four tabs:
 
+- **Connection** — enter any loopback base URL (default `http://127.0.0.1:8765`) and connect.
+  The service probes `/health`, `/v1/models`, `/props` and `/slots`, then shows: online/ready
+  state, supported models with their modalities, the currently loaded model and its path,
+  context size (65,536 here), VLM module status, build info, slots, and sleep state. Pick the
+  model from the discovered list; creation, photo analysis and chat all use the selected model.
+  Generation and chat are blocked until the endpoint is ready. Generic OpenAI-compatible
+  servers without `/props` still work — context/VLM fall back to `/slots` and `/v1/models`.
 - **Create** — brief form, biography upload, photo upload, adult-subject confirmation,
   "Analyze photo", then "Generate character". Photo analysis is a structured vision pass that
   extracts hair, eyes, face, body build, distinctive marks, attire and adult feature/zone notes
@@ -147,9 +155,10 @@ with the exact errors; `normalize_macros()` also rewrites a fixed character name
 
 ## Status
 
-Built and unit-tested locally (16 tests). `json_schema` output, vision input, `/tokenize` and
+Built and unit-tested locally (21 tests). `json_schema` output, vision input, `/tokenize` and
 the live chat path were exercised against the running endpoint during development. The web UI
-was loaded in a real browser and returned HTTP 200 with all three tabs rendered. A full card
+was loaded in a real browser; the Connection tab reported ONLINE · READY with the real loaded
+model, 65,536-token context, VLM enabled and one slot. A full card
 generation is only run when you invoke `run.py` or press "Generate character"; generation length
 and wording depend on the model and the configured sampling. Card import into CT is a manual
 step and was not performed here.

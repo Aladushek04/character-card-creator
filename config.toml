@@ -2,9 +2,12 @@
 # The inference server is an OpenAI-compatible endpoint; no vendor-specific code.
 
 [server]
+# Default only. The web UI lets the user enter any loopback endpoint at runtime.
 base_url = "http://127.0.0.1:8765"
 model = "Huihui-Qwen3.6-35B-A3B-abliterated-ggml-model-Q4_K.gguf"
 timeout_s = 1200
+# Set true only when the inference server is on a trusted LAN.
+allow_remote = false
 
 [generation]
 temperature = 0.9

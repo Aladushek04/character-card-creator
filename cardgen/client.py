@@ -39,11 +39,14 @@ class LlamaClient:
                 "Check that the model server is running."
             ) from exc
 
+    def get_json(self, path: str, timeout: int = 10) -> Any:
+        req = urllib.request.Request(self.base_url + path, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
     def health(self) -> dict[str, Any]:
-        req = urllib.request.Request(self.base_url + "/health", method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                return json.loads(response.read().decode("utf-8"))
+            return self.get_json("/health")
         except Exception as exc:  # network/parse errors are both unhelpful here
             raise InferenceError(f"health check failed: {exc}") from exc
 
