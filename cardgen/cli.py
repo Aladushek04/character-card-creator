@@ -35,7 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--narrative-language", help="language of dialogue and greeting")
     p.add_argument("--definition-language", help="language of the definition")
     p.add_argument("--bio", help="text/markdown biography file used as a creation reference")
-    p.add_argument("--photo", help="reference photo; also used as the card portrait (2:3 crop)")
+    p.add_argument("--photo", "--photos", dest="photos", nargs="+",
+                   help="one to five reference photos; the first is the card portrait")
     p.add_argument("--portrait", help="separate portrait image (overrides --photo for the image)")
     p.add_argument("--no-photo-in-prompt", action="store_true",
                    help="use --photo only as portrait, not as model input")
@@ -72,9 +73,16 @@ def main(argv: list[str] | None = None) -> int:
     if not args.concept:
         print("error: --concept is required (or use --interactive)", file=sys.stderr)
         return 2
-    if args.photo and not Path(args.photo).is_file():
-        print(f"error: photo not found: {args.photo}", file=sys.stderr)
+    photos = args.photos or []
+    if len(photos) > 5:
+        print("error: at most 5 reference photos", file=sys.stderr)
         return 2
+    for photo in photos:
+        if not Path(photo).is_file():
+            print(f"error: photo not found: {photo}", file=sys.stderr)
+            return 2
+    args.photo = photos[0] if photos else None
+    args.photos = photos
     if args.portrait and not Path(args.portrait).is_file():
         print(f"error: portrait not found: {args.portrait}", file=sys.stderr)
         return 2

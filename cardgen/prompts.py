@@ -38,6 +38,14 @@ def build_system_prompt(args: Any, gen_cfg: dict[str, Any], card_cfg: dict[str, 
     )
 
 
+def _photo_count(args: Any) -> int:
+    photos = list(getattr(args, "photos", None) or [])
+    single = getattr(args, "photo", None)
+    if single and single not in photos:
+        photos.append(single)
+    return len(photos)
+
+
 def _biography(args: Any) -> str:
     text = getattr(args, "bio_text", "") or ""
     bio_path = getattr(args, "bio", None)
@@ -55,9 +63,9 @@ def build_brief(args: Any, card_cfg: dict[str, Any]) -> str:
         extra=args.extra or "(none)",
         tags=", ".join(args.tags) if args.tags else "(choose 8-15 fitting lowercase tags)",
         photo_note=(
-            "A reference photo is attached. Derive the appearance section from what you see, "
-            "but NEVER describe anyone who looks underage."
-            if args.photo
+            f"{_photo_count(args)} reference photo(s) are attached. Derive the appearance "
+            "section from all of them, but NEVER describe anyone who looks underage."
+            if _photo_count(args)
             else "No reference photo; invent a coherent appearance."
         ),
         biography=(

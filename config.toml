@@ -39,10 +39,5 @@ portrait_height = 1200
 # CT exports contain both tEXt and compressed zTXt copies of each card chunk.
 embed_ztxt_copies = true
 
-[service]
-# Per-character chat history is trimmed once it exceeds this token budget.
-chat_context_budget = 24000
-chat_max_tokens = 600
-
 [paths]
 output_dir = "generated"

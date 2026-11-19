@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from cardgen.generator import _user_message, photo_paths
 from cardgen.png_io import make_portrait, read_card, read_text_chunks, write_card_png
 from cardgen.schema import (
     DRAFT_SCHEMA,
@@ -119,6 +120,38 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(data["mes_example"], "")
         self.assertEqual(data["character_book"], None)
         self.assertIsInstance(data["creation_date"], int)
+
+
+class MultiPhotoTests(unittest.TestCase):
+    def test_all_photos_become_image_parts(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as td:
+            photos = []
+            for i in range(5):
+                path = Path(td) / f"p{i}.png"
+                Image.new("RGB", (20, 30), (i * 20, 40, 60)).save(path)
+                photos.append(str(path))
+            args = SimpleNamespace(
+                photos=photos, photo=None,
+                no_photo_in_prompt=False, bio=None, bio_text="", appearance_reference="",
+                concept="test", name=None, setting=None, extra=None, tags=None,
+            )
+            self.assertEqual(len(photo_paths(args)), 5)
+            message = _user_message(args, {"narrative_language": "Russian"})
+            parts = message["content"]
+            self.assertEqual(len(parts), 6)  # text + five images
+            self.assertTrue(all(p["type"] == "image_url" for p in parts[1:]))
+
+    def test_no_photos(self):
+        from types import SimpleNamespace
+
+        args = SimpleNamespace(
+            photos=[], photo=None, no_photo_in_prompt=False, bio=None, bio_text="",
+            appearance_reference="", concept="test", name=None, setting=None,
+            extra=None, tags=None,
+        )
+        self.assertEqual(len(_user_message(args, {})["content"]), 1)
 
 
 class PngTests(unittest.TestCase):

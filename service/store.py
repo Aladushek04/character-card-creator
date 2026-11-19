@@ -1,4 +1,4 @@
-"""Filesystem storage: one directory per character, one chat per character."""
+"""Filesystem storage for generated characters (no chat state)."""
 
 from __future__ import annotations
 
@@ -30,30 +30,17 @@ class CharacterStore:
                 continue
             try:
                 card = json.loads(card_file.read_text(encoding="utf-8"))
-                chat = self._read_chat(path)
                 items.append(
                     {
                         "slug": path.name,
                         "name": card["data"].get("name", path.name),
                         "tagline": card["data"].get("creator_notes", "")[:90],
-                        "messages": len(chat),
                         "has_portrait": (path / "card.png").is_file(),
                     }
                 )
             except (OSError, ValueError, KeyError):
                 continue
         return items
-
-    @staticmethod
-    def _read_chat(path: Path) -> list[dict[str, str]]:
-        chat_file = path / "chat.json"
-        if not chat_file.is_file():
-            return []
-        try:
-            data = json.loads(chat_file.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
-        except (OSError, ValueError):
-            return []
 
     def get(self, slug: str) -> dict[str, Any]:
         path = self._dir(slug)
@@ -66,9 +53,9 @@ class CharacterStore:
             "path": path,
             "card": card,
             "meta": meta,
-            "chat": self._read_chat(path),
             "bio": bio.read_text(encoding="utf-8") if bio.is_file() else "",
             "portrait": path / "card.png" if (path / "card.png").is_file() else None,
+            "references": sorted((path / "references").glob("*")) if (path / "references").is_dir() else [],
         }
 
     def create(
@@ -77,8 +64,8 @@ class CharacterStore:
         portrait_png: bytes,
         *,
         bio: str = "",
-        photo: str | Path | None = None,
-        analysis: dict[str, Any] | None = None,
+        photos: list[str | Path] | None = None,
+        analyses: list[dict[str, Any]] | None = None,
         brief: str = "",
     ) -> str:
         name = card["data"]["name"]
@@ -97,15 +84,18 @@ class CharacterStore:
         write_card_png(card, portrait_png, path / "card.png")
         if bio:
             (path / "bio.txt").write_text(bio, encoding="utf-8")
-        if photo:
-            suffix = Path(photo).suffix.lower() or ".png"
-            shutil.copyfile(photo, path / f"reference{suffix}")
+        if photos:
+            ref_dir = path / "references"
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            for index, photo in enumerate(photos, start=1):
+                suffix = Path(photo).suffix.lower() or ".png"
+                shutil.copyfile(photo, ref_dir / f"{index:02d}{suffix}")
         (path / "meta.json").write_text(
             json.dumps(
                 {
                     "slug": slug,
                     "tagline": "",  # CT Studio still requires this manually
-                    "photo_analysis": analysis or {},
+                    "photo_analyses": analyses or [],
                     "brief": brief,
                 },
                 ensure_ascii=False,
@@ -114,17 +104,7 @@ class CharacterStore:
             + "\n",
             encoding="utf-8",
         )
-        (path / "chat.json").write_text("[]\n", encoding="utf-8")
         return slug
-
-    def save_chat(self, slug: str, messages: list[dict[str, str]]) -> None:
-        path = self._dir(slug)
-        (path / "chat.json").write_text(
-            json.dumps(messages, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-
-    def clear_chat(self, slug: str) -> None:
-        self.save_chat(slug, [])
 
     def import_card(self, source: str | Path) -> str:
         """Import an existing CT PNG/JSON card into the library."""
@@ -137,7 +117,5 @@ class CharacterStore:
         else:
             from cardgen.png_io import make_portrait
 
-            portrait_png = make_portrait(
-                None, 800, 1200, card["data"].get("name", "")
-            )
+            portrait_png = make_portrait(None, 800, 1200, card["data"].get("name", ""))
         return self.create(card, portrait_png, brief=f"Imported from {source.name}")

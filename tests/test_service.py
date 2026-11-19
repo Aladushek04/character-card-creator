@@ -3,10 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cardgen.png_io import make_portrait
+from PIL import Image
+
+from cardgen.png_io import make_portrait, write_card_png
 from cardgen.schema import build_card
-from service.chat import ChatEngine
-from service.photo import format_analysis
+from service.photo import UnderageSubject, analyze_photos, format_analyses
 from service.store import CharacterStore
 
 DRAFT = {
@@ -19,23 +20,52 @@ DRAFT = {
 }
 CARD_CFG = {"creator": "a1adu6ek", "character_version": "1.0"}
 
+ANALYSIS = {
+    "age_presentation": "adult",
+    "overall": "tall woman",
+    "hair": "platinum blonde",
+    "eyes": "green",
+    "face": "angular",
+    "body_build": "curvy",
+    "distinctive_marks": ["tattoo on wrist"],
+    "attire": "silk robe",
+    "intimate_features": {
+        "chest": "full", "waist": "narrow", "hips": "wide", "legs": "long",
+        "skin": "smooth", "intimate_attire": "lace", "notes": "visible tattoos",
+    },
+}
 
-class FakeClient:
-    def tokenize(self, text: str) -> int:
-        return len(text) // 4
 
-    def chat_text(self, messages, gen_cfg, max_tokens=256) -> str:
-        return "Я отвечаю как персонаж."
+class FakeAnalysisClient:
+    def __init__(self, underage_at=None):
+        self.underage_at = underage_at
+        self.calls = 0
+
+    def chat_json(self, messages, schema, cfg):
+        self.calls += 1
+        result = json.loads(json.dumps(ANALYSIS))
+        if self.underage_at == self.calls:
+            result["age_presentation"] = "underage"
+        return result, {"completion_tokens": 100}
 
 
 class StoreTests(unittest.TestCase):
-    def test_create_list_get_chat(self):
+    def test_create_list_get_and_references(self):
         with tempfile.TemporaryDirectory() as td:
-            store = CharacterStore(Path(td) / "characters")
+            root = Path(td)
+            store = CharacterStore(root / "characters")
+            photos = []
+            for i in range(3):
+                p = root / f"photo{i}.png"
+                Image.new("RGB", (100 + i, 200), (30, 40, 50)).save(p)
+                photos.append(p)
             card = build_card(DRAFT, CARD_CFG)
-            portrait = make_portrait(None, 800, 1200, "Nyx")
             slug = store.create(
-                card, portrait, bio="A short biography", analysis={"overall": "tall"},
+                card,
+                make_portrait(None, 800, 1200, "Nyx"),
+                bio="A short biography",
+                photos=photos,
+                analyses=[ANALYSIS],
                 brief="concept",
             )
             self.assertEqual(slug, "nyx")
@@ -43,25 +73,17 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(len(items), 1)
             self.assertEqual(items[0]["name"], "Nyx")
             got = store.get(slug)
-            self.assertEqual(got["chat"], [])
             self.assertEqual(got["bio"], "A short biography")
-            self.assertEqual(got["meta"]["photo_analysis"]["overall"], "tall")
+            self.assertEqual(len(got["references"]), 3)
+            self.assertEqual(got["meta"]["photo_analyses"], [ANALYSIS])
             self.assertTrue(got["portrait"].is_file())
-            store.save_chat(slug, [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": "hello"},
-            ])
-            self.assertEqual(len(store.get(slug)["chat"]), 2)
-            store.clear_chat(slug)
-            self.assertEqual(store.get(slug)["chat"], [])
+            self.assertFalse((root / "characters" / slug / "chat.json").exists())
 
     def test_import_card(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             store = CharacterStore(root / "characters")
             card = build_card(DRAFT, CARD_CFG)
-            from cardgen.png_io import write_card_png
-
             src = write_card_png(
                 card, make_portrait(None, 800, 1200, "Nyx"), root / "source.png"
             )
@@ -70,59 +92,36 @@ class StoreTests(unittest.TestCase):
             self.assertTrue((root / "characters" / slug / "card.png").is_file())
 
 
-class ChatTests(unittest.TestCase):
-    def test_one_character_one_chat_and_trimming(self):
-        with tempfile.TemporaryDirectory() as td:
-            store = CharacterStore(Path(td) / "characters")
-            card = build_card(DRAFT, CARD_CFG)
-            slug = store.create(card, make_portrait(None, 800, 1200, "Nyx"))
-            engine = ChatEngine(store, FakeClient(), {
-                "generation": {"temperature": 0.9, "top_p": 0.95, "top_k": 40,
-                               "repeat_penalty": 1.05, "max_tokens": 100},
-                "service": {"chat_context_budget": 10, "chat_max_tokens": 50},
-            })
-            reply = engine.send(slug, "Привет")
-            self.assertEqual(reply, "Я отвечаю как персонаж.")
-            self.assertEqual(len(store.get(slug)["chat"]), 2)
-
-            # A second character must not see the first character's history.
-            other = dict(DRAFT, name="Iris")
-            slug2 = store.create(build_card(other, CARD_CFG), make_portrait(None, 800, 1200, "Iris"))
-            self.assertEqual(store.get(slug2)["chat"], [])
-            engine.send(slug2, "Привет")
-            self.assertEqual(len(store.get(slug)["chat"]), 2)
-            self.assertEqual(len(store.get(slug2)["chat"]), 2)
-
-    def test_system_prompt_is_character_specific(self):
-        with tempfile.TemporaryDirectory() as td:
-            store = CharacterStore(Path(td) / "characters")
-            card = build_card(DRAFT, CARD_CFG)
-            slug = store.create(card, make_portrait(None, 800, 1200, "Nyx"))
-            engine = ChatEngine(store, FakeClient(), {"generation": {}, "service": {}})
-            prompt = engine.system_prompt(store.get(slug))
-            self.assertIn("Nyx", prompt)
-            self.assertNotIn("{{char}}", prompt)
-            self.assertNotIn("{{user}}", prompt)
-            self.assertIn("Never speak", prompt)
-
-
 class PhotoTests(unittest.TestCase):
-    def test_format_analysis(self):
-        text = format_analysis({
-            "overall": "tall woman",
-            "hair": "platinum blonde",
-            "eyes": "green",
-            "face": "angular",
-            "body_build": "curvy",
-            "distinctive_marks": ["tattoo on wrist"],
-            "attire": "silk robe",
-            "intimate_features": {"chest": "full", "waist": "narrow", "hips": "wide",
-                                  "legs": "long", "skin": "smooth",
-                                  "intimate_attire": "lace", "notes": "visible tattoos"},
-        })
-        self.assertIn("platinum blonde", text)
-        self.assertIn("Intimate attire: lace", text)
-        self.assertIn("tattoo on wrist", text)
+    def test_analyze_multiple_and_format(self):
+        with tempfile.TemporaryDirectory() as td:
+            paths = []
+            for i in range(3):
+                p = Path(td) / f"p{i}.png"
+                Image.new("RGB", (60, 80), (10, 20, 30)).save(p)
+                paths.append(p)
+            client = FakeAnalysisClient()
+            results = analyze_photos(client, paths, {"temperature": 0.2}, confirm_adult=True)
+            self.assertEqual(len(results), 3)
+            self.assertEqual(client.calls, 3)
+            text = format_analyses(results)
+            self.assertIn("PHOTO 1", text)
+            self.assertIn("PHOTO 3", text)
+            self.assertIn("platinum blonde", text)
+            self.assertIn("Intimate attire: lace", text)
+
+    def test_underage_photo_blocks_all(self):
+        with tempfile.TemporaryDirectory() as td:
+            paths = []
+            for i in range(3):
+                p = Path(td) / f"p{i}.png"
+                Image.new("RGB", (60, 80), (10, 20, 30)).save(p)
+                paths.append(p)
+            with self.assertRaises(UnderageSubject):
+                analyze_photos(
+                    FakeAnalysisClient(underage_at=2), paths,
+                    {"temperature": 0.2}, confirm_adult=True,
+                )
 
 
 if __name__ == "__main__":

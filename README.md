@@ -2,7 +2,8 @@
 
 Generates Character Card V3 cards for **character-tavern.com** from a short brief, using the
 local OpenAI-compatible inference endpoint at `http://127.0.0.1:8765`. Optionally takes a
-photo, uses it as the visual reference for the definition **and** as the card portrait.
+one to five reference photos, used as visual references for the definition; one of them is
+also the card portrait. The service does generation only — there is no chat.
 
 No site automation: the tool writes `card.json` + `card.png` for manual import in the CT Studio.
 
@@ -82,12 +83,12 @@ Edit `config.toml`:
 # text only
 python run.py --concept "A retired detective who reads memories from objects" --name "Vera"
 
-# photo is both the visual reference and the portrait
+# one to five reference photos; the first is the portrait
 python run.py -i
-python run.py --concept "..." --photo .\ref.jpg --rating mature
+python run.py --concept "..." --photo .\ref1.jpg .\ref2.jpg .\ref3.jpg --rating mature
 
-# photo as portrait only (the model never sees it)
-python run.py --concept "..." --photo .\ref.jpg --no-photo-in-prompt
+# photos as portrait only (the model never sees them)
+python run.py --concept "..." --photo .\ref1.jpg --no-photo-in-prompt
 
 # print the assembled prompts without calling the server
 python run.py --concept "..." --dry-run
@@ -98,23 +99,22 @@ to feed a biography into the definition.
 
 ## Web service (NiceGUI)
 
-Chosen over Reflex, Streamlit, Shiny and Anvil: it is local-first and pure Python on FastAPI,
-handles uploads and stateful per-client UI directly, needs no cloud account, and does not fight
-a chat interface with Streamlit's rerun model.
+Chosen over Reflex, Streamlit, Shiny and Anvil: local-first, pure Python on FastAPI, native
+multi-file uploads and a configurable image gallery, no cloud account.
 
 ```powershell
 python -m pip install -r requirements.txt
 python run_service.py          # http://127.0.0.1:8080
 ```
 
-The UI has four tabs:
+The UI has three tabs:
 
 - **Connection** — enter any loopback base URL and connect. The service detects the flavour:
   llama.cpp/bmoe (`/health`, `/props`, `/slots`, `/tokenize`), **LM Studio** (`/v1/models`,
   `/api/v1/models`) or generic OpenAI-compatible (`/v1/models` only). It shows online/ready
   state, model list with modalities, loaded model and path, context, max context, VLM module,
   quantization, reasoning support, build info and slots. Pick the model from the list; creation,
-  photo analysis and chat all use it. Generation and chat are blocked until ready.
+  photo analysis and generation all use it. Generation is blocked until ready.
   - LM Studio does not expose `/health`, `/props` or `/tokenize`: reachability comes from
     `/v1/models`, loaded instances/context/capabilities from `/api/v1/models`, and token counts
     are estimated. A **Load model** button calls `/api/v1/models/load` with the chosen context
@@ -123,19 +123,18 @@ The UI has four tabs:
   - Verified LM Studio endpoint: `http://127.0.0.1:1234`,
     `qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp@iq3_m` (IQ3_M, 27B, vision-capable,
     max context 262,144). `json_schema` output and image input both work there.
-- **Create** — brief form, biography upload, photo upload, adult-subject confirmation,
-  "Analyze photo", then "Generate character". Photo analysis is a structured vision pass that
-  extracts hair, eyes, face, body build, distinctive marks, attire and adult feature/zone notes
-  (`service/photo.py`); it is injected into the definition. Underage-coded photos are rejected.
-- **Chat** — one character per chat. Every character owns `characters/<slug>/chat.json`; the
-  system prompt is rebuilt from that character's card on every turn, and history is trimmed to
-  `service.chat_context_budget` tokens. Switching characters never mixes context. Optional image
-  attachment per message.
+- **Create** — brief form, biography upload, **up to five photos**, adult-subject confirmation,
+  "Analyze photos", then "Generate character". Uploaded photos are shown in a gallery at full
+  aspect (`object-fit: contain`, no cropping) with individual Remove buttons and a dropdown to
+  choose which one becomes the portrait. Photo analysis is a structured vision pass per photo
+  that extracts hair, eyes, face, body build, distinctive marks, attire and adult feature/zone
+  notes (`service/photo.py`); all analyses are injected into the definition. Any underage-coded
+  photo blocks the whole batch.
 - **Card** — definition/greeting preview, portrait, and direct download links for the V3
   `card.json` and `card.png`.
 
-The sidebar can also import an existing CT PNG/JSON card into the library. Runtime data
-(`characters/`, `uploads/`, `generated/`) is gitignored.
+The sidebar lists generated characters. Runtime data (`characters/`, `uploads/`, `generated/`)
+is gitignored. There is no chat UI and no chat storage.
 
 Repository: https://github.com/Aladushek04/character-card-creator
 
@@ -164,10 +163,10 @@ with the exact errors; `normalize_macros()` also rewrites a fixed character name
 
 ## Status
 
-Built and unit-tested locally (26 tests). `json_schema` output, vision input, `/tokenize` and
-the live chat path were exercised against the running endpoint during development. The web UI
-was loaded in a real browser; the Connection tab reported ONLINE · READY with the real loaded
-model, 65,536-token context, VLM enabled and one slot. A full card
-generation is only run when you invoke `run.py` or press "Generate character"; generation length
-and wording depend on the model and the configured sampling. Card import into CT is a manual
-step and was not performed here.
+Built and unit-tested locally (27 tests). `json_schema` output and vision input were exercised
+against both the llama.cpp and LM Studio endpoints. The web UI was loaded in a real browser:
+three tabs only (no chat), a three-photo batch produced three full-aspect previews with
+`object-fit: contain`, and the Connection tab reported ONLINE · READY with the loaded model,
+context and VLM state. A full card generation is only run when you invoke `run.py` or press
+"Generate character"; generation length and wording depend on the model and sampling. Card
+import into CT is a manual step and was not performed here.

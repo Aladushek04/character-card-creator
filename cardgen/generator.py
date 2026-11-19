@@ -34,10 +34,19 @@ def _image_part(path: str) -> dict[str, Any]:
     }
 
 
+def photo_paths(args: Any) -> list[str]:
+    photos = list(getattr(args, "photos", None) or [])
+    single = getattr(args, "photo", None)
+    if single and single not in photos:
+        photos.append(single)
+    return photos
+
+
 def _user_message(args: Any, card_cfg: dict[str, Any]) -> dict[str, Any]:
     content: list[dict[str, Any]] = [{"type": "text", "text": build_brief(args, card_cfg)}]
-    if args.photo and not args.no_photo_in_prompt:
-        content.append(_image_part(args.photo))
+    if not args.no_photo_in_prompt:
+        for photo in photo_paths(args):
+            content.append(_image_part(photo))
     return {"role": "user", "content": content}
 
 
@@ -130,7 +139,7 @@ def generate(args: Any, config: dict[str, Any]) -> dict[str, Any]:
         except (InferenceError, ValueError):
             pass  # keep the first valid card; the token count is reported
 
-    portrait_source = args.portrait or args.photo
+    portrait_source = args.portrait or (photo_paths(args)[0] if photo_paths(args) else None)
     portrait = make_portrait(
         portrait_source,
         card_cfg["portrait_width"],

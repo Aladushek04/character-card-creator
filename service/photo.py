@@ -86,6 +86,38 @@ def analyze_photo(
     return result
 
 
+def analyze_photos(
+    client: LlamaClient,
+    photos: list[str | Path],
+    gen_cfg: dict[str, Any],
+    *,
+    confirm_adult: bool = False,
+) -> list[dict[str, Any]]:
+    """Analyse every reference photo. Any underage result blocks all of them."""
+    results = []
+    for index, photo in enumerate(photos, start=1):
+        try:
+            analysis = analyze_photo(
+                client, photo, gen_cfg, confirm_adult=confirm_adult
+            )
+        except UnderageSubject as exc:
+            raise UnderageSubject(f"photo {index}: {exc}") from exc
+        analysis["_source"] = str(photo)
+        analysis["_index"] = index
+        results.append(analysis)
+    return results
+
+
+def format_analyses(analyses: list[dict[str, Any]] | None) -> str:
+    if not analyses:
+        return "No photo analysis available."
+    blocks = []
+    for item in analyses:
+        clean = {k: v for k, v in item.items() if not k.startswith("_")}
+        blocks.append(f"PHOTO {item.get('_index', len(blocks) + 1)}:\n{format_analysis(clean)}")
+    return "\n\n".join(blocks)
+
+
 def format_analysis(analysis: dict[str, Any] | None) -> str:
     """Render the structured photo analysis as a brief block for card generation."""
     if not analysis:
