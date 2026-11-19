@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,14 @@ def _generate_draft(
     gen_cfg: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     last_errors: list[str] = []
-    for attempt in range(gen_cfg["retries"] + 1):
+    attempts = gen_cfg["retries"] + 1
+    for attempt in range(attempts):
+        started = time.monotonic()
+        print(
+            f"[generate] attempt {attempt + 1}/{attempts}: requesting "
+            f"{gen_cfg['max_tokens']} tokens...",
+            flush=True,
+        )
         try:
             draft, usage = client.chat_json(
                 [{"role": "system", "content": system_prompt}, *messages],
@@ -56,9 +64,16 @@ def _generate_draft(
             )
         except (InferenceError, ValueError) as exc:
             last_errors.append(f"model output could not be parsed: {exc}")
+            print(f"[generate] attempt {attempt + 1} failed to parse: {exc}", flush=True)
             continue
         draft = normalize_macros(draft)
         errors = validate_draft(draft)
+        print(
+            f"[generate] attempt {attempt + 1}: "
+            f"{usage.get('completion_tokens', '?')} tokens in {time.monotonic() - started:.0f}s — "
+            + ("valid" if not errors else "validation failed: " + "; ".join(errors)),
+            flush=True,
+        )
         if not errors:
             return draft, usage
         last_errors = errors

@@ -14,8 +14,11 @@ temperature = 0.9
 top_p = 0.95
 top_k = 40
 repeat_penalty = 1.05
-max_tokens = 2600
-retries = 2
+# At ~8 tok/s on this machine, one full card takes roughly 4-6 minutes.
+# retries = 1 means at most two generation passes; the server has a single slot,
+# so parallel generations simply queue up.
+max_tokens = 2200
+retries = 1
 # CT targets: definition 3500-6000 characters, greeting 800-3200 characters.
 # Character counts are validated; the token ceiling is measured with POST /tokenize.
 min_definition_chars = 3500

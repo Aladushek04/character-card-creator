@@ -34,7 +34,7 @@ DRAFT_SCHEMA: dict[str, Any] = {
         "name": {"type": "string", "minLength": 3, "maxLength": 80},
         "tagline": {"type": "string", "minLength": 10, "maxLength": 150},
         "description": {"type": "string", "minLength": 1200, "maxLength": 6000},
-        "first_mes": {"type": "string", "minLength": 800, "maxLength": 3200},
+        "first_mes": {"type": "string", "minLength": 200, "maxLength": 3200},
         "creator_notes": {"type": "string", "minLength": 20, "maxLength": 25000},
         "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 100},
     },
@@ -138,19 +138,10 @@ def validate_draft(draft: dict[str, Any]) -> list[str]:
         errors.append(f"name must be {NAME_TARGET[0]}-{NAME_TARGET[1]} characters")
     if tagline and not _in_range(tagline.strip(), TAGLINE_TARGET):
         errors.append(f"tagline must be {TAGLINE_TARGET[0]}-{TAGLINE_TARGET[1]} characters")
-    if description:
-        if len(description) < 200:
-            errors.append("definition is below CT's 200-character minimum")
-        elif not _in_range(description, DEFINITION_TARGET):
-            errors.append(
-                f"definition should be {DEFINITION_TARGET[0]}-{DEFINITION_TARGET[1]} characters "
-                f"(currently {len(description)})"
-            )
-    if first_mes and not _in_range(first_mes, GREETING_TARGET):
-        errors.append(
-            f"greeting should be {GREETING_TARGET[0]}-{GREETING_TARGET[1]} characters "
-            f"(currently {len(first_mes)})"
-        )
+    if description and len(description) < 1200:
+        errors.append("definition is below the 1200-character anti-spam floor")
+    if first_mes and len(first_mes) < 200:
+        errors.append("greeting is too short to be usable")
     if creator_notes and len(creator_notes.strip()) < 10:
         errors.append("public description must be at least 10 characters")
     if tags is not None:
@@ -189,6 +180,24 @@ def validate_draft(draft: dict[str, Any]) -> list[str]:
         errors.append("links are not allowed in cards: " + ", ".join(urls[:3]))
 
     return errors
+
+
+def draft_warnings(draft: dict[str, Any]) -> list[str]:
+    """CT 'aim for' targets. Reported to the user, never used to retry generation."""
+    warnings: list[str] = []
+    description = str(draft.get("description", ""))
+    first_mes = str(draft.get("first_mes", ""))
+    if description and not _in_range(description, DEFINITION_TARGET):
+        warnings.append(
+            f"definition {len(description)} chars; CT suggests {DEFINITION_TARGET[0]}-"
+            f"{DEFINITION_TARGET[1]}"
+        )
+    if first_mes and not _in_range(first_mes, GREETING_TARGET):
+        warnings.append(
+            f"greeting {len(first_mes)} chars; CT suggests {GREETING_TARGET[0]}-"
+            f"{GREETING_TARGET[1]}"
+        )
+    return warnings
 
 
 def build_card(draft: dict[str, Any], card_cfg: dict[str, Any]) -> dict[str, Any]:

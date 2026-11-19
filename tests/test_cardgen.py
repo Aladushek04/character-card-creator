@@ -10,6 +10,7 @@ from cardgen.png_io import make_portrait, read_card, read_text_chunks, write_car
 from cardgen.schema import (
     DRAFT_SCHEMA,
     build_card,
+    draft_warnings,
     normalize_macros,
     validate_draft,
 )
@@ -54,7 +55,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual((p["name"]["minLength"], p["name"]["maxLength"]), (3, 80))
         self.assertEqual((p["tagline"]["minLength"], p["tagline"]["maxLength"]), (10, 150))
         self.assertEqual((p["description"]["minLength"], p["description"]["maxLength"]), (1200, 6000))
-        self.assertEqual((p["first_mes"]["minLength"], p["first_mes"]["maxLength"]), (800, 3200))
+        self.assertEqual((p["first_mes"]["minLength"], p["first_mes"]["maxLength"]), (200, 3200))
 
     def test_valid_draft(self):
         self.assertEqual(validate_draft(make_draft()), [])
@@ -96,6 +97,11 @@ class SchemaTests(unittest.TestCase):
         self.assertIn("{{char}}", normalized["description"])
         self.assertNotIn("Nyx", normalized["first_mes"])
         self.assertIn("{{user}}", normalized["first_mes"])
+
+    def test_soft_targets_are_warnings_not_errors(self):
+        draft = make_draft(description="{{char}} watches {{user}} closely. " * 50)
+        self.assertEqual(validate_draft(draft), [])
+        self.assertTrue(any("CT suggests" in w for w in draft_warnings(draft)))
 
     def test_build_card_layout(self):
         card = build_card(make_draft(), CARD_CFG)

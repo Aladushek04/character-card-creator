@@ -67,7 +67,9 @@ Edit `config.toml`:
 
 - `server.base_url` / `server.model` — startup defaults only; the web UI can change both at
   runtime. `server.allow_remote` is `false` (loopback endpoints only for now).
-- `generation.max_tokens` — output length; 2600 fits a full definition.
+- `generation.max_tokens` — output cap (2200). At the measured ~8 tok/s one card takes 4–6 min;
+  `retries = 1` allows at most two passes. CT's 3500–6000 char definition target is reported as
+  a note, not a hard failure, so a slightly shorter card does not trigger a full regeneration.
 - `generation.min_definition_chars` / `max_definition_chars` — CT's 3500–6000 character target.
 - `generation.max_description_tokens` — secondary token ceiling measured with `/tokenize` (1600).
 - `card.narrative_language` / `card.definition_language` — card text in English, roleplay
@@ -155,7 +157,7 @@ with the exact errors; `normalize_macros()` also rewrites a fixed character name
 
 ## Status
 
-Built and unit-tested locally (21 tests). `json_schema` output, vision input, `/tokenize` and
+Built and unit-tested locally (22 tests). `json_schema` output, vision input, `/tokenize` and
 the live chat path were exercised against the running endpoint during development. The web UI
 was loaded in a real browser; the Connection tab reported ONLINE · READY with the real loaded
 model, 65,536-token context, VLM enabled and one slot. A full card

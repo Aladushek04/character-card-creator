@@ -12,6 +12,7 @@ from typing import Any
 from .client import InferenceError
 from .generator import generate
 from .prompts import build_brief, build_system_prompt
+from .schema import draft_warnings
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -106,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Greeting:          {m['greeting']} chars (target 800-3200)")
     print(f"Tagline:           {m['tagline']} chars (target 10-150)")
     print(f"Card tokens:       {result['total_tokens']}")
+    for warning in draft_warnings(result["draft"]):
+        print(f"Note: {warning}")
     print(f"Usage:             {json.dumps(result['usage'].get('completion_tokens', 0))} completion tokens")
     print(f"JSON:  {result['json_path']}")
     print(f"PNG:   {result['png_path']}")
