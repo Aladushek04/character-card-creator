@@ -90,7 +90,37 @@ python run.py --concept "..." --photo .\ref.jpg --no-photo-in-prompt
 python run.py --concept "..." --dry-run
 ```
 
-Output goes to `generated/<name>.json` and `generated/<name>.png`.
+Output goes to `generated/<name>.json` and `generated/<name>.png`. Add `--bio path\to\bio.md`
+to feed a biography into the definition.
+
+## Web service (NiceGUI)
+
+Chosen over Reflex, Streamlit, Shiny and Anvil: it is local-first and pure Python on FastAPI,
+handles uploads and stateful per-client UI directly, needs no cloud account, and does not fight
+a chat interface with Streamlit's rerun model.
+
+```powershell
+python -m pip install -r requirements.txt
+python run_service.py          # http://127.0.0.1:8080
+```
+
+The UI has three tabs:
+
+- **Create** — brief form, biography upload, photo upload, adult-subject confirmation,
+  "Analyze photo", then "Generate character". Photo analysis is a structured vision pass that
+  extracts hair, eyes, face, body build, distinctive marks, attire and adult feature/zone notes
+  (`service/photo.py`); it is injected into the definition. Underage-coded photos are rejected.
+- **Chat** — one character per chat. Every character owns `characters/<slug>/chat.json`; the
+  system prompt is rebuilt from that character's card on every turn, and history is trimmed to
+  `service.chat_context_budget` tokens. Switching characters never mixes context. Optional image
+  attachment per message.
+- **Card** — definition/greeting preview, portrait, and direct download links for the V3
+  `card.json` and `card.png`.
+
+The sidebar can also import an existing CT PNG/JSON card into the library. Runtime data
+(`characters/`, `uploads/`, `generated/`) is gitignored.
+
+Repository: https://github.com/Aladushek04/character-card-creator
 
 ## Import into Character Tavern
 
@@ -117,8 +147,9 @@ with the exact errors; `normalize_macros()` also rewrites a fixed character name
 
 ## Status
 
-Built and unit-tested locally. `json_schema` output, vision input, `/tokenize` and the live
-chat path were exercised against the running endpoint during development. A full card
-generation is only run when you invoke `run.py`; generation length and wording depend on the
-model and the configured sampling. Card import into CT is a manual step and was not performed
-here.
+Built and unit-tested locally (16 tests). `json_schema` output, vision input, `/tokenize` and
+the live chat path were exercised against the running endpoint during development. The web UI
+was loaded in a real browser and returned HTTP 200 with all three tabs rendered. A full card
+generation is only run when you invoke `run.py` or press "Generate character"; generation length
+and wording depend on the model and the configured sampling. Card import into CT is a manual
+step and was not performed here.
