@@ -109,13 +109,20 @@ python run_service.py          # http://127.0.0.1:8080
 
 The UI has four tabs:
 
-- **Connection** — enter any loopback base URL (default `http://127.0.0.1:8765`) and connect.
-  The service probes `/health`, `/v1/models`, `/props` and `/slots`, then shows: online/ready
-  state, supported models with their modalities, the currently loaded model and its path,
-  context size (65,536 here), VLM module status, build info, slots, and sleep state. Pick the
-  model from the discovered list; creation, photo analysis and chat all use the selected model.
-  Generation and chat are blocked until the endpoint is ready. Generic OpenAI-compatible
-  servers without `/props` still work — context/VLM fall back to `/slots` and `/v1/models`.
+- **Connection** — enter any loopback base URL and connect. The service detects the flavour:
+  llama.cpp/bmoe (`/health`, `/props`, `/slots`, `/tokenize`), **LM Studio** (`/v1/models`,
+  `/api/v1/models`) or generic OpenAI-compatible (`/v1/models` only). It shows online/ready
+  state, model list with modalities, loaded model and path, context, max context, VLM module,
+  quantization, reasoning support, build info and slots. Pick the model from the list; creation,
+  photo analysis and chat all use it. Generation and chat are blocked until ready.
+  - LM Studio does not expose `/health`, `/props` or `/tokenize`: reachability comes from
+    `/v1/models`, loaded instances/context/capabilities from `/api/v1/models`, and token counts
+    are estimated. A **Load model** button calls `/api/v1/models/load` with the chosen context
+    when the model is unloaded. Reasoning is disabled in requests (`"reasoning": false`) so it
+    cannot consume the whole token budget with an empty `content`.
+  - Verified LM Studio endpoint: `http://127.0.0.1:1234`,
+    `qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp@iq3_m` (IQ3_M, 27B, vision-capable,
+    max context 262,144). `json_schema` output and image input both work there.
 - **Create** — brief form, biography upload, photo upload, adult-subject confirmation,
   "Analyze photo", then "Generate character". Photo analysis is a structured vision pass that
   extracts hair, eyes, face, body build, distinctive marks, attire and adult feature/zone notes
@@ -157,7 +164,7 @@ with the exact errors; `normalize_macros()` also rewrites a fixed character name
 
 ## Status
 
-Built and unit-tested locally (22 tests). `json_schema` output, vision input, `/tokenize` and
+Built and unit-tested locally (26 tests). `json_schema` output, vision input, `/tokenize` and
 the live chat path were exercised against the running endpoint during development. The web UI
 was loaded in a real browser; the Connection tab reported ONLINE · READY with the real loaded
 model, 65,536-token context, VLM enabled and one slot. A full card

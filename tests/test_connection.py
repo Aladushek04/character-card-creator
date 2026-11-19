@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from service.connection import ConnectionState
@@ -35,6 +36,40 @@ def fake_get_no_props(url, path):
     if path == "/props":
         raise OSError("404")
     return fake_get(url, path)
+
+
+LM_MODELS = {
+    "models": [
+        {
+            "type": "llm",
+            "key": "qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp",
+            "display_name": "Qwen3.8 27B Uncensored HauhauCS Aggressive",
+            "quantization": {"name": "IQ3_M", "bits_per_weight": 3},
+            "params_string": "27B",
+            "max_context_length": 262144,
+            "capabilities": {"vision": True, "trained_for_tool_use": True,
+                             "reasoning": {"allowed_options": ["off", "on"], "default": "on"}},
+            "loaded_instances": [{
+                "id": "qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp@iq3_m",
+                "config": {"context_length": 65024},
+            }],
+        }
+    ]
+}
+
+
+def fake_get_lmstudio(url, path):
+    if path == "/health":
+        raise OSError("unexpected endpoint")
+    if path == "/v1/models":
+        return {
+            "object": "list",
+            "data": [{"id": "qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp@iq3_m",
+                      "object": "model", "owned_by": "organization_owner"}],
+        }
+    if path == "/api/v1/models":
+        return LM_MODELS
+    raise OSError("unexpected endpoint")
 
 
 class ConnectionTests(unittest.TestCase):
@@ -84,6 +119,69 @@ class ConnectionTests(unittest.TestCase):
         self.assertFalse(summary["online"])
         self.assertFalse(summary["ready"])
         self.assertIn("connection refused", summary["error"])
+
+    def test_error_object_from_props_is_not_misclassified(self):
+        def getter(url, path):
+            if path == "/props":
+                return {"error": "Unexpected endpoint or method. (GET /props)"}
+            if path == "/slots":
+                return {"error": "Unexpected endpoint or method. (GET /slots)"}
+            return fake_get_lmstudio(url, path)
+
+        conn = ConnectionState("http://127.0.0.1:1234", get_json=getter)
+        summary = conn.probe()
+        self.assertEqual(summary["api_flavor"], "LM Studio")
+        self.assertFalse(summary["props_available"])
+        self.assertEqual(summary["context"], 65024)
+
+    def test_lm_studio_probe(self):
+        conn = ConnectionState(
+            "http://127.0.0.1:1234", get_json=fake_get_lmstudio, allow_remote=False
+        )
+        summary = conn.probe()
+        self.assertTrue(summary["online"])
+        self.assertEqual(summary["api_flavor"], "LM Studio")
+        self.assertEqual(summary["context"], 65024)
+        self.assertEqual(summary["max_context"], 262144)
+        self.assertTrue(summary["vision"])
+        self.assertTrue(summary["ready"])
+        details = summary["model_details"][summary["selected_model"]]
+        self.assertEqual(details["quant"], "IQ3_M")
+        self.assertEqual(details["key"], "qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp")
+        self.assertTrue(details["reasoning"])
+        self.assertTrue(conn.make_client().disable_reasoning)
+
+    def test_lm_studio_unloaded_is_not_ready(self):
+        def getter(url, path):
+            if path == "/api/v1/models":
+                payload = json.loads(json.dumps(LM_MODELS))
+                payload["models"][0]["loaded_instances"] = []
+                return payload
+            return fake_get_lmstudio(url, path)
+
+        conn = ConnectionState("http://127.0.0.1:1234", get_json=getter)
+        summary = conn.probe()
+        self.assertEqual(summary["api_flavor"], "LM Studio")
+        self.assertFalse(summary["ready"])
+        self.assertEqual(summary["loaded_instances"], [])
+
+    def test_lm_studio_load_model(self):
+        calls = []
+
+        def poster(url, path, payload):
+            calls.append((path, payload))
+            return {"status": "loaded"}
+
+        conn = ConnectionState(
+            "http://127.0.0.1:1234", get_json=fake_get_lmstudio, post_json=poster
+        )
+        conn.probe()
+        conn.load_model(context_length=16384)
+        self.assertEqual(calls[0][0], "/api/v1/models/load")
+        self.assertEqual(calls[0][1]["context_length"], 16384)
+        self.assertEqual(
+            calls[0][1]["model"], "qwen3.8-27b-uncensored-hauhaucs-aggressive-mtp"
+        )
 
     def test_model_selection_and_override(self):
         conn = self.make()

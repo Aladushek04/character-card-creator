@@ -14,10 +14,19 @@ class InferenceError(RuntimeError):
 
 
 class LlamaClient:
-    def __init__(self, base_url: str, model: str, timeout_s: int = 1200):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        timeout_s: int = 1200,
+        *,
+        disable_reasoning: bool = False,
+    ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_s = timeout_s
+        self.disable_reasoning = disable_reasoning
+        self._tokenizer_exact: bool | None = None
 
     def _post(self, path: str, payload: dict[str, Any]) -> Any:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -60,11 +69,28 @@ class LlamaClient:
             raise InferenceError(f"model listing failed: {exc}") from exc
 
     def tokenize(self, text: str) -> int:
-        result = self._post("/tokenize", {"content": text, "add_special": False})
-        tokens = result.get("tokens")
-        if not isinstance(tokens, list):
-            raise InferenceError(f"unexpected /tokenize response: {str(result)[:300]}")
-        return len(tokens)
+        """Use the server tokenizer when available; otherwise estimate.
+
+        LM Studio and other generic OpenAI-compatible servers do not expose
+        /tokenize. An estimate is sufficient for budget reporting and history
+        trimming; it is labelled as such by the caller.
+        """
+        try:
+            result = self._post("/tokenize", {"content": text, "add_special": False})
+            tokens = result.get("tokens") if isinstance(result, dict) else None
+            if isinstance(tokens, list):
+                self._tokenizer_exact = True
+                return len(tokens)
+        except Exception:
+            pass
+        self._tokenizer_exact = False
+        return max(1, len(text) // 4)
+
+    @property
+    def exact_tokenizer(self) -> bool:
+        if self._tokenizer_exact is None:
+            self.tokenize("x")
+        return bool(self._tokenizer_exact)
 
     def chat_json(
         self,
@@ -86,6 +112,8 @@ class LlamaClient:
             "repeat_penalty": gen_cfg["repeat_penalty"],
             "max_tokens": gen_cfg["max_tokens"],
         }
+        if self.disable_reasoning:
+            payload["reasoning"] = False
         result = self._post("/v1/chat/completions", payload)
         try:
             content = result["choices"][0]["message"]["content"]
@@ -104,6 +132,8 @@ class LlamaClient:
             "top_p": gen_cfg["top_p"],
             "max_tokens": max_tokens,
         }
+        if self.disable_reasoning:
+            payload["reasoning"] = False
         result = self._post("/v1/chat/completions", payload)
         return result["choices"][0]["message"]["content"]
 

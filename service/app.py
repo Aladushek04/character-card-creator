@@ -68,8 +68,8 @@ def build_ui(config: dict[str, Any]) -> None:
         char_list = ui.column().classes("w-full")
 
         async def on_import(e: Any) -> None:
-            data = await e.content.read()
-            path = uploads / f"import_{uuid.uuid4().hex}{Path(e.name).suffix or '.png'}"
+            data = await e.file.read()
+            path = uploads / f"import_{uuid.uuid4().hex}{Path(e.file.name).suffix or '.png'}"
             path.write_bytes(data)
             try:
                 slug = store.import_card(path)
@@ -109,6 +109,8 @@ def build_ui(config: dict[str, Any]) -> None:
             url_in = ui.input("API base URL", value=conn.base_url).classes("w-full")
             with ui.row().classes("items-center gap-3"):
                 conn_button = ui.button("Connect / refresh", icon="link")
+                ctx_in = ui.number("Load context", value=32768, min=2048, max=262144)
+                load_button = ui.button("Load model (LM Studio)", icon="download")
                 status_label = ui.label("")
             model_select = ui.select(
                 [], label="Model to use", with_input=True,
@@ -116,6 +118,7 @@ def build_ui(config: dict[str, Any]) -> None:
             ).classes("w-full")
             conn_info = ui.column().classes("w-full")
             conn_error = ui.label("").classes("text-negative")
+            updating_select = {"active": False}
 
             def render_conn() -> None:
                 summary = conn.summary()
@@ -126,19 +129,32 @@ def build_ui(config: dict[str, Any]) -> None:
                 ).classes(
                     "text-positive" if summary["ready"] else "text-negative"
                 )
-                conn_error.set_text(summary["error"])
+                conn_error.set_text(summary["error"]).classes(
+                    "text-caption opacity-70" if summary["online"] else "text-negative"
+                )
+                if summary["api_flavor"] == "LM Studio" and not summary["loaded_instances"]:
+                    load_button.enable()
+                else:
+                    load_button.disable()
                 ids = [m["id"] for m in summary["models"]]
-                model_select.set_options(ids)
-                model_select.value = summary["selected_model"]
+                updating_select["active"] = True
+                try:
+                    model_select.set_options(ids)
+                    model_select.value = summary["selected_model"]
+                finally:
+                    updating_select["active"] = False
                 conn_info.clear()
                 with conn_info:
                     ctx = summary["context"]
+                    details = summary["model_details"].get(summary["selected_model"], {})
                     rows = [
                         ("Endpoint", summary["base_url"]),
+                        ("API flavour", summary["api_flavor"]),
                         ("Server build", summary["build_info"] or "not reported"),
-                        ("Loaded model", summary["loaded_model"] or "not reported"),
+                        ("Loaded model", summary["loaded_model"] or "not loaded"),
                         ("Selected model", summary["selected_model"] or "none"),
                         ("Context", f"{ctx:,} tokens" if ctx else "unknown"),
+                        ("Max context", f"{summary['max_context']:,} tokens" if summary["max_context"] else "unknown"),
                         ("VLM module", "enabled" if summary["vision"] else "not reported / disabled"),
                         ("Video / Audio", f"{summary['video']} / {summary['audio']}"),
                         (
@@ -151,6 +167,12 @@ def build_ui(config: dict[str, Any]) -> None:
                         ),
                         ("Model path", summary["model_path"] or "not reported"),
                     ]
+                    if details:
+                        rows += [
+                            ("Quantization", details.get("quant", "not reported")),
+                            ("Parameters", details.get("params", "not reported")),
+                            ("Reasoning support", str(details.get("reasoning", False))),
+                        ]
                     lines = ["| Field | Value |", "|---|---|"] + [
                         f"| {k} | {str(v).replace('|', '/')} |" for k, v in rows
                     ]
@@ -160,8 +182,14 @@ def build_ui(config: dict[str, Any]) -> None:
                             "This server does not expose /props; context and VLM data come "
                             "from /v1/models and /slots where available."
                         ).classes("text-caption opacity-70")
+                    if summary["api_flavor"] != "llama.cpp":
+                        ui.label(
+                            "Token counts are estimated (server has no /tokenize endpoint)."
+                        ).classes("text-caption opacity-70")
 
             def on_model(value: str) -> None:
+                if updating_select["active"]:
+                    return
                 conn.set_model(value)
                 engine.set_client(conn.make_client())
                 render_conn()
@@ -178,6 +206,19 @@ def build_ui(config: dict[str, Any]) -> None:
                           type="positive" if conn.ready else "warning")
 
             conn_button.on_click(do_connect)
+
+            async def do_load() -> None:
+                try:
+                    await run.io_bound(
+                        conn.load_model, conn.selected_model, int(ctx_in.value or 32768)
+                    )
+                    engine.set_client(conn.make_client())
+                    render_conn()
+                    ui.notify("Model loaded", type="positive")
+                except Exception as exc:
+                    ui.notify(str(exc), type="negative", timeout=8000)
+
+            load_button.on_click(do_load)
 
             def require_ready() -> bool:
                 if conn.ready:
@@ -208,18 +249,18 @@ def build_ui(config: dict[str, Any]) -> None:
             photo_status = ui.label("Photo: none")
 
             async def on_bio(e: Any) -> None:
-                raw = await e.content.read()
+                raw = await e.file.read()
                 state["bio"] = raw.decode("utf-8", errors="replace")
-                bio_status.set_text(f"Biography: {e.name} ({len(state['bio'])} chars)")
+                bio_status.set_text(f"Biography: {e.file.name} ({len(state['bio'])} chars)")
 
             async def on_photo(e: Any) -> None:
-                raw = await e.content.read()
-                suffix = Path(e.name).suffix or ".png"
+                raw = await e.file.read()
+                suffix = Path(e.file.name).suffix or ".png"
                 path = uploads / f"photo_{uuid.uuid4().hex}{suffix}"
                 path.write_bytes(raw)
                 state["photo"] = str(path)
                 state["analysis"] = None
-                photo_status.set_text(f"Photo: {e.name}")
+                photo_status.set_text(f"Photo: {e.file.name}")
                 preview.clear()
                 with preview:
                     ui.image(str(path)).classes("w-40")
@@ -346,8 +387,8 @@ def build_ui(config: dict[str, Any]) -> None:
             chat_status = ui.label("")
 
             async def on_chat_photo(e: Any) -> None:
-                raw = await e.content.read()
-                suffix = Path(e.name).suffix or ".png"
+                raw = await e.file.read()
+                suffix = Path(e.file.name).suffix or ".png"
                 path = uploads / f"chat_{uuid.uuid4().hex}{suffix}"
                 path.write_bytes(raw)
                 state["chat_image"] = str(path)
