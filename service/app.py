@@ -79,7 +79,8 @@ def build_ui(config: dict[str, Any]) -> None:
             except Exception as exc:
                 ui.notify(str(exc), type="negative")
 
-        ui.upload(label="Import card PNG/JSON", auto_upload=True, on_upload=on_import).classes("w-full")
+        ui.upload(label="Import card PNG/JSON", auto_upload=True, on_upload=on_import)\
+            .props("no-thumbnails").classes("w-full")
 
         def refresh_list() -> None:
             char_list.clear()
@@ -266,8 +267,10 @@ def build_ui(config: dict[str, Any]) -> None:
                     ui.image(str(path)).classes("w-40")
 
             with ui.row().classes("w-full gap-4"):
-                ui.upload(label="Biography .txt/.md", auto_upload=True, on_upload=on_bio)
-                ui.upload(label="Photo (appearance reference)", auto_upload=True, on_upload=on_photo)
+                ui.upload(label="Biography .txt/.md", auto_upload=True, on_upload=on_bio)\
+                    .props("no-thumbnails")
+                ui.upload(label="Photo (appearance reference)", auto_upload=True, on_upload=on_photo)\
+                    .props("no-thumbnails")
             confirm_adult = ui.checkbox(
                 "I confirm every person in the photo is an adult (21+) and I may use it as a reference"
             )
@@ -416,7 +419,8 @@ def build_ui(config: dict[str, Any]) -> None:
 
             with ui.row().classes("w-full items-center"):
                 ui.button("Send", icon="send", on_click=send_message)
-                ui.upload(label="Attach image", auto_upload=True, on_upload=on_chat_photo)
+                ui.upload(label="Attach image", auto_upload=True, on_upload=on_chat_photo)\
+                    .props("no-thumbnails")
                 ui.button(
                     "Clear chat",
                     icon="delete",
