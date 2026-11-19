@@ -48,6 +48,7 @@ def build_ui(config: dict[str, Any]) -> None:
         "slug": None,
         "bio": "",
         "photos": [],
+        "photo_labels": {},
         "portrait": None,
         "analyses": [],
     }
@@ -74,10 +75,19 @@ def build_ui(config: dict[str, Any]) -> None:
             with char_list:
                 for item in store.list():
                     active = item["slug"] == state["slug"]
-                    ui.button(
-                        f"{item['name']} · {item['tagline'][:48]}",
-                        on_click=lambda s=item["slug"]: select(s),
-                    ).props("flat" if not active else "outline").classes("w-full text-left")
+                    character = store.get(item["slug"])
+                    with ui.row().classes("w-full items-center gap-2"):
+                        if character["portrait"]:
+                            ui.image(str(character["portrait"])).props("fit=contain").style(
+                                "height: 34px; width: 34px; flex: 0 0 34px;"
+                            )
+                        ui.button(
+                            item["name"],
+                            on_click=lambda s=item["slug"]: select(s),
+                        ).props("flat no-caps" if not active else "outline no-caps").style(
+                            "text-transform: none; text-align: left; white-space: nowrap; "
+                            "overflow: hidden; text-overflow: ellipsis; max-width: 100%;"
+                        ).classes("text-left")
 
         def select(slug: str) -> None:
             state["slug"] = slug
@@ -214,17 +224,22 @@ def build_ui(config: dict[str, Any]) -> None:
                 tags_in = ui.input("Tags (space separated)")
             concept_in = ui.textarea("Concept (the core of the character)").classes("w-full")
             extra_in = ui.textarea("Extra requirements").classes("w-full")
-            bio_status = ui.label("Biography: none")
+            bio_input = ui.textarea(
+                "Biography (primary input)",
+                placeholder="Paste or write the character's biography here...",
+            ).classes("w-full")
+            bio_input.on_value_change(lambda e: state.__setitem__("bio", e.value or ""))
+            bio_status = ui.label("Optional: load the biography from a file")
             bio_upload = ui.upload(
-                label="Biography .txt/.md", auto_upload=True,
+                label="Load biography from file (optional)", auto_upload=True,
                 on_upload=lambda e: on_bio(e),
             ).props("no-thumbnails")
 
             ui.separator()
             ui.label("2 · Reference photos (up to 5)").classes("text-subtitle1")
             ui.label(
-                "Full-size previews are shown below. The first photo is used as the card "
-                "portrait unless you pick another."
+                "Full-size previews below. The first photo is the card portrait by default; "
+                "use “Set as portrait” on any photo to change it."
             ).classes("text-caption opacity-70")
             photo_upload = ui.upload(
                 label="Photos (PNG / JPG / WebP)",
@@ -234,7 +249,6 @@ def build_ui(config: dict[str, Any]) -> None:
                 on_multi_upload=lambda e: on_photos(e),
             ).props("no-thumbnails").classes("w-full")
             photo_gallery = ui.row().classes("w-full gap-3 items-start flex-wrap")
-            portrait_select = ui.select({}, label="Portrait source").classes("w-full")
             analysis_view = ui.markdown("").classes("w-full")
             confirm_adult = ui.checkbox(
                 "I confirm every person in the photos is an adult (21+) and I may use them "
@@ -242,8 +256,10 @@ def build_ui(config: dict[str, Any]) -> None:
             )
 
             async def on_bio(e: Any) -> None:
-                state["bio"] = await e.file.text()
-                bio_status.set_text(f"Biography: {e.file.name} ({len(state['bio'])} chars)")
+                text = await e.file.text()
+                state["bio"] = text
+                bio_input.value = text
+                bio_status.set_text(f"Loaded from file: {e.file.name} ({len(text)} chars)")
 
             def photo_basename(path: str) -> str:
                 return Path(path).name
@@ -251,27 +267,37 @@ def build_ui(config: dict[str, Any]) -> None:
             def render_photos() -> None:
                 photo_gallery.clear()
                 for index, path in enumerate(state["photos"], start=1):
+                    label = state["photo_labels"].get(path, photo_basename(path))
                     with photo_gallery:
                         with ui.card().classes("w-52"):
                             ui.image(path).props("fit=contain").style(
                                 "height: 240px; width: 100%;"
                             )
-                            ui.label(f"{index}. {photo_basename(path)}").classes("text-caption")
+                            ui.label(f"{index}. {label}").style(
+                                "max-width: 100%; overflow: hidden; text-overflow: ellipsis; "
+                                "white-space: nowrap;"
+                            ).classes("text-caption")
                             with ui.row().classes("items-center gap-2"):
                                 if state["portrait"] == path:
                                     ui.badge("portrait", color="primary")
+                                else:
+                                    ui.button(
+                                        "Set as portrait", icon="photo",
+                                        on_click=lambda p=path: set_portrait(p),
+                                    ).props("dense flat no-caps")
                                 ui.button(
                                     "Remove", icon="close",
                                     on_click=lambda p=path: remove_photo(p),
                                 ).props("dense flat")
-                portrait_select.set_options(
-                    {p: photo_basename(p) for p in state["photos"]}
-                )
-                portrait_select.value = state["portrait"]
+
+            def set_portrait(path: str) -> None:
+                state["portrait"] = path
+                render_photos()
 
             def remove_photo(path: str) -> None:
                 if path in state["photos"]:
                     state["photos"].remove(path)
+                state["photo_labels"].pop(path, None)
                 if state["portrait"] == path:
                     state["portrait"] = state["photos"][0] if state["photos"] else None
                 state["analyses"] = []
@@ -288,18 +314,13 @@ def build_ui(config: dict[str, Any]) -> None:
                     await file.save(path)
                     if str(path) not in state["photos"]:
                         state["photos"].append(str(path))
+                        state["photo_labels"][str(path)] = file.name
                 if state["photos"] and not state["portrait"]:
                     state["portrait"] = state["photos"][0]
                 state["analyses"] = []
                 analysis_view.set_content("")
                 render_photos()
                 ui.notify(f"{len(state['photos'])} photo(s) ready", type="positive")
-
-            def on_portrait_change(e: Any) -> None:
-                state["portrait"] = e.value
-                render_photos()
-
-            portrait_select.on_value_change(on_portrait_change)
 
             async def do_analyze() -> None:
                 if not state["photos"]:
