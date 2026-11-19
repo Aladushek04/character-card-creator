@@ -1,0 +1,15 @@
+Create one Character Tavern character card from this brief.
+
+Concept: %concept%
+Name: %name%
+Setting: %setting%
+Additional requirements: %extra%
+Required or suggested tags: %tags%
+
+%photo_note%
+
+%biography%
+
+%appearance_reference%
+
+Return only the JSON object described in the system prompt.

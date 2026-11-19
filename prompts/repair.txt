@@ -1,0 +1,6 @@
+The previous JSON output failed validation. Fix every problem below and return the complete corrected JSON object only.
+
+Errors:
+%errors%
+
+Keep the same character and style. Do not add commentary or markdown fences.

@@ -1,0 +1,1 @@
+The "description" field is too long. Return the complete JSON object again with a "description" of at most %max_chars% characters, keeping the same section labels and all {{char}}/{{user}} macros. Keep every other field unchanged. No commentary, no markdown fences.

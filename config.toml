@@ -1,0 +1,42 @@
+# Character Card Generator configuration.
+# The inference server is an OpenAI-compatible endpoint; no vendor-specific code.
+
+[server]
+base_url = "http://127.0.0.1:8765"
+model = "Huihui-Qwen3.6-35B-A3B-abliterated-ggml-model-Q4_K.gguf"
+timeout_s = 1200
+
+[generation]
+temperature = 0.9
+top_p = 0.95
+top_k = 40
+repeat_penalty = 1.05
+max_tokens = 2600
+retries = 2
+# CT targets: definition 3500-6000 characters, greeting 800-3200 characters.
+# Character counts are validated; the token ceiling is measured with POST /tokenize.
+min_definition_chars = 3500
+max_definition_chars = 6000
+max_description_tokens = 1600
+
+[card]
+creator = "a1adu6ek"
+character_version = "1.0"
+# Language of in-character prose (greeting, sample lines, first message).
+narrative_language = "Russian"
+# Language of the definition itself; English keeps model instructions unambiguous.
+definition_language = "English"
+# spicy | mature | explicit - controls the intensity of intimate content in the brief.
+content_rating = "mature"
+portrait_width = 800
+portrait_height = 1200
+# CT exports contain both tEXt and compressed zTXt copies of each card chunk.
+embed_ztxt_copies = true
+
+[service]
+# Per-character chat history is trimmed once it exceeds this token budget.
+chat_context_budget = 24000
+chat_max_tokens = 600
+
+[paths]
+output_dir = "generated"
